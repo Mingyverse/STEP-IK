@@ -6,7 +6,7 @@ STEP-IK (Surface Tracking for Enhanced Placement with Inverse Kinematics) is a U
 
 ## Downloads
 
-Download the file you need below, or see the [v0.7.1 release notes](https://github.com/Mingyverse/STEP-IK/releases/tag/v0.7.1).
+Download the file you need below, or see the [Release Notes](https://github.com/Mingyverse/STEP-IK/releases).
 
 | File | Use |
 | --- | --- |
@@ -51,8 +51,6 @@ The Studio selector and benchmark use the order shown below. Fixed and adaptive 
 5. Disable competing foot IK on the same leg bones. Press Play and compare the base animation and STEP-IK on flat ground before trying stairs.
 
 The component is `StepIKController`. Your locomotion code continues to drive the Animator and root. The API exposes `TryBindHumanoid`, `SetContactWeights`, `SetMode`, `StartSimulation`, `EndSimulation`, `ResetRuntime` and `Telemetry`. See the [humanoid setup and C# example](docs/HUMANOID_SETUP.md).
-
-When upgrading from v0.6, update your C# references to `StepIKController`, the `StepIK` namespace and `StepIK.TestMode.StepIK`. Back up your project, import the package, and check your existing character references and script compilation before testing.
 
 ## Build from source
 
