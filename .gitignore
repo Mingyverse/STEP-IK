@@ -1,0 +1,19 @@
+/Library/
+/Temp/
+/Obj/
+/obj/
+/Logs/
+/UserSettings/
+/Build/
+/Builds/
+/.idea/
+/.vs/
+*.csproj
+*.sln
+*.unitypackage
+/Assets/DenysAlmaral/
+/Assets/DenysAlmaral.meta
+/Assets/StepIKGenerated/
+/Assets/StepIKGenerated.meta
+/Assets/TextMesh Pro/
+/Assets/TextMesh Pro.meta
