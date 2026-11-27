@@ -10,15 +10,17 @@ Download the file you need below, or see the [Release Notes](https://github.com/
 
 | File | Use |
 | --- | --- |
-| [STEP-IK-Studio-Windows-x64-v0.7.1.zip](https://github.com/Mingyverse/STEP-IK/releases/download/v0.7.1/STEP-IK-Studio-Windows-x64-v0.7.1.zip) | Play the standalone sandbox on Windows x64. Unity is unnecessary. |
-| [STEP-IK-Unity-API-v0.7.1.unitypackage](https://github.com/Mingyverse/STEP-IK/releases/download/v0.7.1/STEP-IK-Unity-API-v0.7.1.unitypackage) | Import the C# component and humanoid setup menu into a Unity project. |
+| [STEP-IK-Studio-Windows-x64-v0.7.5.zip](https://github.com/Mingyverse/STEP-IK/releases/download/v0.7.5/STEP-IK-Studio-Windows-x64-v0.7.5.zip) | Play the standalone sandbox on Windows x64. Unity is unnecessary. |
+| [STEP-IK-Unity-API-v0.7.5.unitypackage](https://github.com/Mingyverse/STEP-IK/releases/download/v0.7.5/STEP-IK-Unity-API-v0.7.5.unitypackage) | Import the C# component and humanoid setup menu into a Unity project. |
 
 ## Run the sandbox
 
 1. Extract the entire Windows ZIP to a folder.
 2. Open `STEP-IK Studio.exe` from that folder. Keep the executable, companion DLLs and data folder together.
 3. Choose a world, method, camera and cast. Enter a walker count from **1 to 100**, then press Enter. The walk-speed slider spans **0.5–2.0 m/s**.
-4. Drag in the 3D view to orbit. Enable **Manual Walk** to move one character with camera-relative **WASD** or arrow keys. Tap **Shift** or use the **Sprint** button while moving to sprint. Stopping resets sprint.
+4. Drag with the left or right mouse button to orbit. Scroll over the 3D view to zoom in or out in any camera mode.
+5. Choose **Free Camera** to hold the viewpoint in place as characters move. Middle-drag to pan, or choose **Follow** to recenter on the character.
+6. Enable **Manual Walk** to move one character with camera-relative **WASD** or arrow keys. Tap **Shift** or use the **Sprint** button while moving to sprint. Stopping resets sprint.
 
 ## Compare methods
 
@@ -37,6 +39,7 @@ The Studio selector and benchmark use the order shown below. Fixed and adaptive 
 - **This method** records the current method and world. **All 7 here** records all methods in the current world.
 - **Benchmark all methods** runs slopes, stairs and uneven ground. **Selected count** runs 21 trials. **50 + 100** runs 42 trials and takes about five minutes.
 - Each trial uses a one-second warm-up and six seconds of capture. Conditions within a terrain and crowd size use the same cast, walk clip, speed and route.
+- Camera input is locked during recordings. Starting a trial from Free Camera temporarily uses the default zoom in Follow, then restores the free view.
 - Stay in the Studio window during a timed run. Switching windows cancels the run to keep paused time out of the measurements. When you return, start a new run. Files from completed trials remain on disk.
 - The results popup shows combined and terrain-level results. Use **Open results folder** to find the summary and per-trial CSV/JSON exports. On Windows the default parent folder is `%USERPROFILE%\AppData\LocalLow\DefaultCompany\STEP-IK Studio\StepIKBenchmarks`.
 

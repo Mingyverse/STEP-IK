@@ -54,6 +54,8 @@ namespace StepIK.Sandbox
         private const int MaxActors = 100;
         private static readonly int[] BenchmarkWorlds = { 1, 2, 3 };
         private static readonly int[] StressCounts = { 50, 100 };
+        private enum CameraMode { Follow, FootCloseUp, Overview, Free }
+        private static readonly string[] CameraNames = { "Follow", "Foot close-up", "Overview", "Free Camera" };
         private readonly int[] counts = { 1, 4, 8, 16, 25, 50, 100 };
         private readonly float[] speeds = { 1f, 0.75f, 1.25f };
         private float sliderSpeed = 1f;
@@ -62,12 +64,16 @@ namespace StepIK.Sandbox
         private readonly BenchmarkMetrics metrics = new BenchmarkMetrics(MaxActors);
         private readonly List<BenchmarkFrame> frames = new List<BenchmarkFrame>(8192);
         private static readonly ProfilerMarker MeasureMarker = new ProfilerMarker("StepIK.MeasurementOverhead");
-        private int method, terrain, activeCount = 1, speedIndex, cameraMode;
+        private int method, terrain, activeCount = 1, speedIndex;
+        private CameraMode cameraMode;
         private int castIndex, matrixIndex;
         private int stressIndex, countBeforeBenchmark;
         private bool stressBenchmark, benchmarkLostFocus;
         private float yaw, pitch = 16f;
-        private bool dragging;
+        private bool orbiting, panning;
+        private float cameraZoom = 1f, freeCameraDistance;
+        private Vector3 freeCameraPivot;
+        private readonly List<RaycastResult> cameraPointerHits = new List<RaycastResult>(8);
         private string runFolder, castDescription;
         private float clock, nextUi, travelDistance;
         private bool playing = true, recording, suite, measuring;
@@ -95,6 +101,8 @@ namespace StepIK.Sandbox
         public bool IsSprinting => manual && sprint.Active;
         public float ManualSpeed => manualSpeed;
         private bool UsesNativeIK => ComparisonMethods[method].Mode == TestMode.UnityAnimatorIK;
+        private CameraMode ActiveCameraMode => recording && cameraMode == CameraMode.Free ? CameraMode.Follow : cameraMode;
+        private float ActiveCameraZoom => recording && cameraMode == CameraMode.Free ? 1f : cameraZoom;
 
         private void Start()
         {
@@ -120,7 +128,8 @@ namespace StepIK.Sandbox
                     });
                 }
                 else Bind(speedChoice, speeds.Select(n => $"Speed · {n:F2} m/s"), value => { speedIndex = value; ResetTrial(); });
-                Bind(cameraChoice, new[] { "Camera · Follow", "Camera · Foot close-up", "Camera · Overview" }, value => cameraMode = value);
+                cameraChoice.ClearOptions();
+                Bind(cameraChoice, CameraNames.Select(name => "Camera · " + name), value => ChangeCameraMode((CameraMode)value));
                 Bind(castChoice, new[] { "Cast · Mixed" }.Concat(cast.Select(a => a.name)), value =>
                 {
                     castIndex = value;
@@ -142,7 +151,7 @@ namespace StepIK.Sandbox
                 terrainButton.onClick.AddListener(() => { if (!recording) { terrain = (terrain + 1) % WorldCount; ResetTrial(); } });
                 countButton.onClick.AddListener(() => SetCrowdCount(counts[(Array.IndexOf(counts, ActiveCount) + 1) % counts.Length]));
                 speedButton.onClick.AddListener(() => { if (!recording) { speedIndex = (speedIndex + 1) % speeds.Length; ResetTrial(); } });
-                cameraButton.onClick.AddListener(() => { if (!recording) cameraMode = (cameraMode + 1) % 3; });
+                cameraButton.onClick.AddListener(() => { if (!recording) ChangeCameraMode((CameraMode)(((int)cameraMode + 1) % CameraNames.Length)); });
             }
             playButton.onClick.AddListener(() =>
             {
@@ -221,6 +230,7 @@ namespace StepIK.Sandbox
 
         private void OnApplicationFocus(bool hasFocus)
         {
+            if (!hasFocus) orbiting = panning = false;
             if (!hasFocus && recording && !Application.isEditor)
                 benchmarkLostFocus = true;
         }
@@ -314,7 +324,7 @@ namespace StepIK.Sandbox
                 ResetPreview("Recording cancelled because the window lost focus. Keep STEP-IK focused and restart the benchmark.");
                 return;
             }
-            UpdateOrbitInput();
+            UpdateCameraInput();
             if (playing)
             {
                 clock += Time.deltaTime;
@@ -452,21 +462,66 @@ namespace StepIK.Sandbox
             return 0f;
         }
 
-        private void UpdateOrbitInput()
+        private void ChangeCameraMode(CameraMode nextMode)
+        {
+            if (nextMode == cameraMode) return;
+            if (nextMode == CameraMode.Free)
+            {
+                freeCameraPivot = TrackingFocus(cameraMode);
+                freeCameraDistance = CameraDistance(cameraMode);
+                pitch = CameraPitch(cameraMode);
+            }
+            cameraMode = nextMode;
+            cameraZoom = 1f;
+            orbiting = panning = false;
+            RefreshUI();
+        }
+
+        private void UpdateCameraInput()
         {
             var mouse = Mouse.current;
             if (recording || mouse == null || (resultsPanel && resultsPanel.activeSelf))
             {
-                dragging = false;
+                orbiting = panning = false;
                 return;
             }
-            if (mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame)
-                dragging = EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject();
-            if (!mouse.leftButton.isPressed && !mouse.rightButton.isPressed) dragging = false;
-            if (!dragging) return;
+            bool startOrbit = mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame;
+            bool startPan = cameraMode == CameraMode.Free && mouse.middleButton.wasPressedThisFrame;
+            float scroll = mouse.scroll.y.ReadValue();
+            if ((startOrbit || startPan || scroll != 0f) && !IsOverCameraUI(mouse.position.ReadValue()))
+            {
+                if (startOrbit) orbiting = true;
+                if (startPan) panning = true;
+                if (InputSystem.settings.scrollDeltaBehavior == InputSettings.ScrollDeltaBehavior.KeepPlatformSpecificInputRange &&
+                    (Application.platform == RuntimePlatform.WindowsPlayer || Application.platform == RuntimePlatform.WindowsEditor))
+                    scroll /= 120f;
+                cameraZoom = Mathf.Clamp(cameraZoom * Mathf.Pow(0.85f, scroll), 0.25f, 4f);
+            }
+            if (!mouse.leftButton.isPressed && !mouse.rightButton.isPressed) orbiting = false;
+            if (!mouse.middleButton.isPressed) panning = false;
             Vector2 delta = mouse.delta.ReadValue();
-            yaw = Mathf.Repeat(yaw + delta.x * 0.24f, 360f);
-            pitch = Mathf.Clamp(pitch - delta.y * 0.20f, 5f, 75f);
+            if (panning)
+            {
+                var rotation = viewCamera.transform.rotation;
+                float metresPerPixel = 2f * CameraDistance(CameraMode.Free) *
+                    Mathf.Tan(viewCamera.fieldOfView * 0.5f * Mathf.Deg2Rad) / Mathf.Max(1, viewCamera.pixelHeight);
+                freeCameraPivot -= rotation * new Vector3(delta.x, delta.y, 0f) * metresPerPixel;
+            }
+            else if (orbiting)
+            {
+                yaw = Mathf.Repeat(yaw + delta.x * 0.24f, 360f);
+                pitch = Mathf.Clamp(pitch - delta.y * 0.20f, 5f, 85f);
+            }
+        }
+
+        private bool IsOverCameraUI(Vector2 point)
+        {
+            var events = EventSystem.current;
+            if (!events) return false;
+            events.RaycastAll(new PointerEventData(events) { position = point }, cameraPointerHits);
+            bool overUI = cameraPointerHits.Exists(hit => hit.module is UnityEngine.UI.GraphicRaycaster);
+            cameraPointerHits.Clear();
+            return overUI;
         }
 
         public static float SurfaceHeight(int type, float x, float z)
@@ -597,13 +652,28 @@ namespace StepIK.Sandbox
 
         private void UpdateCamera()
         {
-            Vector3 focus = actors[0].transform.position + Vector3.up * (cameraMode == 1 ? 0.28f : 0.90f);
+            CameraMode mode = ActiveCameraMode;
+            Vector3 focus = mode == CameraMode.Free ? freeCameraPivot : TrackingFocus(mode);
+            Quaternion rotation = Quaternion.Euler(CameraPitch(mode), yaw, 0f);
+            viewCamera.transform.SetPositionAndRotation(focus - rotation * Vector3.forward * CameraDistance(mode), rotation);
+        }
+
+        private Vector3 TrackingFocus(CameraMode mode)
+        {
+            Vector3 focus = actors[0].transform.position + Vector3.up * (mode == CameraMode.FootCloseUp ? 0.28f : 0.90f);
             if (!manual && ActiveCount > 1) focus = Vector3.Lerp(focus, actors[ActiveCount - 1].transform.position + Vector3.up * 0.9f, 0.5f);
-            float distance = cameraMode == 1 ? 2.1f : cameraMode == 2 || (!manual && ActiveCount > 25)
+            return focus;
+        }
+
+        private float CameraPitch(CameraMode mode) => mode == CameraMode.Overview ? Mathf.Max(35f, pitch) : pitch;
+
+        private float CameraDistance(CameraMode mode)
+        {
+            float distance = mode == CameraMode.Free ? freeCameraDistance :
+                mode == CameraMode.FootCloseUp ? 2.1f : mode == CameraMode.Overview || (!manual && ActiveCount > 25)
                 ? Mathf.Max(15f, Mathf.Min(50, ActiveCount) * 0.66f)
                 : !manual && ActiveCount > 8 ? 9f : 4.4f;
-            Quaternion rotation = Quaternion.Euler(cameraMode == 2 ? Mathf.Max(35f, pitch) : pitch, yaw, 0f);
-            viewCamera.transform.SetPositionAndRotation(focus - rotation * Vector3.forward * distance, rotation);
+            return Mathf.Clamp(distance * ActiveCameraZoom, 0.5f, 125f);
         }
 
         private void RefreshUI()
@@ -612,6 +682,7 @@ namespace StepIK.Sandbox
             {
                 methodChoice.SetValueWithoutNotify(method);
                 worldChoice.SetValueWithoutNotify(terrain);
+                cameraChoice.SetValueWithoutNotify((int)ActiveCameraMode);
                 methodChoice.interactable = worldChoice.interactable =
                     cameraChoice.interactable = castChoice.interactable = !recording;
                 if (speedSlider)
@@ -636,7 +707,7 @@ namespace StepIK.Sandbox
             {
             methodLabel.text = Methods[method]; terrainLabel.text = "World · " + Terrains[terrain];
             countLabel.text = "Characters · " + (manual ? 1 : ActiveCount); speedLabel.text = $"Speed · {WalkSpeed:F2} m/s";
-            cameraLabel.text = "Camera · " + new[] { "Follow", "Foot close-up", "Overview" }[cameraMode];
+            cameraLabel.text = "Camera · " + CameraNames[(int)ActiveCameraMode];
             methodButton.interactable = terrainButton.interactable = countButton.interactable = speedButton.interactable = cameraButton.interactable = !recording;
             countButton.interactable = !recording && !manual;
             }
@@ -653,8 +724,10 @@ namespace StepIK.Sandbox
             statusLabel.text = status;
             string stanceGap = latest.stanceProbes > 0 ? $"{latest.stanceMeanAbsoluteGap * 1000f:F1} mm" : "—";
             metricsLabel.text = $"LIVE DIAGNOSTICS\nFrame interval   {latest.frameMs:F2} ms\nEstimated FPS   {(latest.frameMs > 0f ? 1000f / latest.frameMs : 0f):F1}\nManaged IK   {latest.scriptMs:F3} ms\nGround queries   {latest.groundQueries}\nCached feet   {latest.cachedFeet}\nStance gap   {stanceGap}\nClipped feet / frame   {latest.clippedFootFrames}\nNew clipping events   {latest.clippingEvents}\nCorrection change   {latest.correctionDegreesPerSecond:F1} deg/s\nValid sole probes   {latest.validProbes}";
-            noteLabel.text = manual
-                ? "WASD / arrows move relative to the camera. Tap Shift while moving to sprint. Release movement to reset. Drag in the view to orbit."
+            noteLabel.text = ActiveCameraMode == CameraMode.Free
+                ? "Drag to orbit · Middle-drag to pan · Scroll to zoom." + (manual ? " WASD / arrows walk. Shift sprints." : " Choose Follow to recenter.")
+                : manual
+                ? "WASD / arrows walk. Tap Shift to sprint until you stop. Drag to orbit and scroll to zoom in the view."
                 : UsesNativeIK
                 ? "Built-in IK: script time EXCLUDES Unity's native solve. Use Profiler / matched total frame measurements."
                 : "Stance gap uses grounded phases of the shared clip. Correction change measures foot rotation relative to the base pose.";
@@ -679,7 +752,7 @@ namespace StepIK.Sandbox
             public TrialSummary summary;
             public string cast, scoring = BenchmarkScoring.Formula;
             public string[] activeActors;
-            public float cameraYaw, cameraPitch, routeStartZ;
+            public float cameraYaw, cameraPitch, cameraZoom, routeStartZ;
             public double observedMeasurementSeconds, probeHitPercent;
         }
 
@@ -697,7 +770,7 @@ namespace StepIK.Sandbox
                     f.clippedFootFrames, f.clippingEvents, f.correctionDegreesPerSecond, f.groundQueries, f.cachedFeet, f.observedFeet);
             string csvPath = Path.Combine(folder, stem + ".csv");
             File.WriteAllText(csvPath, csv.ToString());
-            var metadata = new RunMetadata { method = Methods[method], terrain = Terrains[terrain], camera = new[] { "Follow", "Foot close-up", "Overview" }[cameraMode],
+            var metadata = new RunMetadata { method = Methods[method], terrain = Terrains[terrain], camera = CameraNames[(int)ActiveCameraMode],
                 unityVersion = Application.unityVersion, device = SystemInfo.deviceModel, processor = SystemInfo.processorType,
                 graphics = SystemInfo.graphicsDeviceName, operatingSystem = SystemInfo.operatingSystem, assets = generatedAssetFolder,
                 scene = gameObject.scene.path,
@@ -711,7 +784,7 @@ namespace StepIK.Sandbox
                 fabrikIterations = actors[0].fabrikIterations, ccdIterations = actors[0].ccdIterations, settings = actors[0].settings,
                 cast = castDescription,
                 activeActors = actors.Take(ActiveCount).Select(actor => actor.name).ToArray(),
-                cameraYaw = yaw, cameraPitch = pitch,
+                cameraYaw = yaw, cameraPitch = CameraPitch(ActiveCameraMode), cameraZoom = ActiveCameraZoom,
                 routeStartZ = RecordedRouteStartZ(terrain), observedMeasurementSeconds = observedMeasurementSeconds,
                 roughWorlds = useRoughWorlds, probeHitPercent = summary.ProbeHitPercent,
                 animation = authoredCharacter ? "City People basic walk; shared explicit animation phase" : "Prototype muscle walk",
